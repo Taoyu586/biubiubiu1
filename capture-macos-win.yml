@@ -1,0 +1,69 @@
+name: Capture macOS win screen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install runtime dependency
+        run: |
+          brew update
+          brew install raylib
+
+      - name: Prepare patched game
+        run: |
+          unzip -o biubiubiu-macos-winpatched.zip
+          chmod +x patched-macos/biubiubiu
+          codesign --force --deep --sign - patched-macos/biubiubiu
+
+      - name: Launch and capture
+        run: |
+          set -euxo pipefail
+
+          cd patched-macos
+          ./biubiubiu > ../game.log 2>&1 &
+          GAME_PID=$!
+
+          for i in $(seq 1 20); do
+            if ! kill -0 "$GAME_PID" 2>/dev/null; then
+              echo "game exited before capture"
+              cat ../game.log
+              exit 1
+            fi
+
+            WINDOW_ID=$(python3 ../scripts/find_game_window.py || true)
+
+            if [ -n "$WINDOW_ID" ]; then
+              screencapture -x -l "$WINDOW_ID" ../biubiubiu-win.png
+              break
+            fi
+
+            sleep 1
+          done
+
+          if [ ! -s ../biubiubiu-win.png ]; then
+            echo "No game window found; falling back to full-display capture"
+            python3 ../scripts/list_windows.py || true
+            screencapture -x ../biubiubiu-win.png
+          fi
+
+          kill "$GAME_PID" || true
+          cd ..
+
+          file biubiubiu-win.png
+          ls -lh biubiubiu-win.png
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: biubiubiu-win-screenshot
+          path: |
+            biubiubiu-win.png
+            game.log
