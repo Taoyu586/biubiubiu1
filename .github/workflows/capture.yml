@@ -1,0 +1,45 @@
+name: Capture macOS win screen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install runtime dependency
+        run: |
+          brew update
+          brew install raylib
+
+      - name: Prepare patched game
+        run: |
+          unzip -o biubiubiu-macos-winpatched.zip
+          chmod +x patched-macos/biubiubiu
+          codesign --force --deep --sign - patched-macos/biubiubiu
+
+      - name: Launch and capture
+        run: |
+          set -euxo pipefail
+
+          ./patched-macos/biubiubiu &
+          GAME_PID=$!
+
+          sleep 8
+          screencapture -x biubiubiu-win.png
+
+          kill "$GAME_PID" || true
+
+          file biubiubiu-win.png
+          ls -lh biubiubiu-win.png
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: biubiubiu-win-screenshot
+          path: biubiubiu-win.png
