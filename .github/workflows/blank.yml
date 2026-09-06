@@ -1,4 +1,4 @@
-name: Capture macOS win screen
+name: Capture macOS win screen better
 
 on:
   workflow_dispatch:
@@ -27,13 +27,73 @@ jobs:
         run: |
           set -euxo pipefail
 
-          ./patched-macos/biubiubiu &
+          cd patched-macos
+          ./biubiubiu > ../game.log 2>&1 &
           GAME_PID=$!
 
-          sleep 8
-          screencapture -x biubiubiu-win.png
+          for i in $(seq 1 20); do
+            if ! kill -0 "$GAME_PID" 2>/dev/null; then
+              echo "game exited before capture"
+              cat ../game.log
+              exit 1
+            fi
+
+            WINDOW_ID=$(python3 - <<'PY' || true
+import Quartz
+
+windows = Quartz.CGWindowListCopyWindowInfo(
+    Quartz.kCGWindowListOptionOnScreenOnly,
+    Quartz.kCGNullWindowID,
+)
+
+for w in windows:
+    owner = w.get("kCGWindowOwnerName", "")
+    title = w.get("kCGWindowName", "")
+    bounds = w.get("kCGWindowBounds", {})
+    width = int(bounds.get("Width", 0))
+    height = int(bounds.get("Height", 0))
+    if width >= 700 and height >= 500 and (
+        "biubiubiu" in owner.lower()
+        or "biubiubiu" in title.lower()
+        or "raylib" in owner.lower()
+        or "raylib" in title.lower()
+    ):
+        print(w["kCGWindowNumber"])
+        break
+PY
+)
+
+            if [ -n "$WINDOW_ID" ]; then
+              screencapture -x -l "$WINDOW_ID" ../biubiubiu-win.png
+              break
+            fi
+
+            sleep 1
+          done
+
+          if [ ! -s ../biubiubiu-win.png ]; then
+            echo "No game window found; falling back to full-display capture"
+            python3 - <<'PY' || true
+import Quartz
+
+windows = Quartz.CGWindowListCopyWindowInfo(
+    Quartz.kCGWindowListOptionOnScreenOnly,
+    Quartz.kCGNullWindowID,
+)
+
+for w in windows:
+    print({
+        "id": w.get("kCGWindowNumber"),
+        "owner": w.get("kCGWindowOwnerName"),
+        "title": w.get("kCGWindowName"),
+        "bounds": w.get("kCGWindowBounds"),
+    })
+PY
+            screencapture -x ../biubiubiu-win.png
+          fi
 
           kill "$GAME_PID" || true
+          cd ..
 
           file biubiubiu-win.png
           ls -lh biubiubiu-win.png
@@ -42,4 +102,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: biubiubiu-win-screenshot
-          path: biubiubiu-win.png
+          path: |
+            biubiubiu-win.png
+            game.log
